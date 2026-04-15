@@ -1,20 +1,15 @@
 import logging
-import json
 import sys
 import os
 
-from friend_circle_lite.get_info import (
-    fetch_and_process_data,
-    marge_data_from_json_url,
-    marge_errors_from_json_url,
-    deal_with_large_data
-)
-from friend_circle_lite.get_conf import load_config
-from rss_subscribe.push_article_update import (
-    get_latest_articles_from_link,
-    extract_emails_from_issues
-)
-from push_rss_update.send_email import send_emails
+from friend_circle_lite.all_friends import fetch_and_process_data, marge_data_from_json_url, marge_errors_from_json_url, deal_with_large_data
+from friend_circle_lite.utils.json import write_json
+from friend_circle_lite.utils.config import load_config
+from friend_circle_lite.utils.mail import send_emails
+from friend_circle_lite.single_friend import get_latest_articles_from_link
+from friend_circle_lite.utils.github import extract_emails_from_issues
+
+FUTURE_ARTICLE_TOLERANCE_DAYS = 2
 
 # ========== 日志设置 ==========
 logging.basicConfig(
@@ -22,41 +17,45 @@ logging.basicConfig(
     format='😋 %(levelname)s: %(message)s'
 )
 
+# ========== 加载环境变量 ==========
+# if os.getenv("GITHUB_TOKEN") is None:
+#     from dotenv import load_dotenv
+#     load_dotenv()
+
 # ========== 加载配置 ==========
 config = load_config("./conf.yaml")
 
 # ========== 爬虫模块 ==========
 if config["spider_settings"]["enable"]:
+    
     logging.info("✅ 爬虫已启用")
-
     json_url = config['spider_settings']['json_url']
     article_count = config['spider_settings']['article_count']
     specific_rss = config['specific_RSS']
 
     logging.info(f"📥 正在从 {json_url} 获取数据，每个博客获取 {article_count} 篇文章")
     result, lost_friends = fetch_and_process_data(
-        json_url=json_url,
-        specific_RSS=specific_rss,
-        count=article_count
-    ) # type: ignore
+        json_url        = json_url,             # 包含朋友信息的 JSON 文件的 URL。
+        specific_RSS    = specific_rss,         # 包含特定 RSS 源的字典列表 [{name, url}]（来自 YAML）。
+        count           = article_count,        # 获取每个博客的最大文章数。
+        cache_file      = "./temp/cache.json"   # 缓存文件路径。
+    )
 
     if config["spider_settings"]["merge_result"]["enable"]:
+
         merge_url = config['spider_settings']["merge_result"]['merge_json_url']
         logging.info(f"🔀 合并功能开启，从 {merge_url} 获取外部数据")
-
         result = marge_data_from_json_url(result, f"{merge_url}/all.json")
         lost_friends = marge_errors_from_json_url(lost_friends, f"{merge_url}/errors.json")
 
     article_count = len(result.get("article_data", []))
-    logging.info(f"📦 数据获取完毕，共有 {article_count} 位好友的动态，正在处理数据")
+    logging.info(f"📦 数据获取完毕，共有 {article_count} 篇文章，正在处理数据")
 
-    result = deal_with_large_data(result)
+    future_tolerance_days = FUTURE_ARTICLE_TOLERANCE_DAYS
+    result = deal_with_large_data(result, future_tolerance_days=future_tolerance_days)
 
-    with open("all.json", "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
-
-    with open("errors.json", "w", encoding="utf-8") as f:
-        json.dump(lost_friends, f, ensure_ascii=False, indent=2)
+    write_json("./all.json", result)
+    write_json("./errors.json", lost_friends)
 
 # ========== 邮箱推送准备 ==========
 SMTP_isReady = False
@@ -111,7 +110,7 @@ if config["rss_subscribe"]["enable"] and SMTP_isReady:
     latest_articles = get_latest_articles_from_link(
         url=your_blog_url,
         count=5,
-        last_articles_path="./rss_subscribe/last_articles.json" # 存储上一次的文章
+        last_articles_path="./temp/newest_posts.json" # 存储上一次的文章
     )
 
     if not latest_articles:
