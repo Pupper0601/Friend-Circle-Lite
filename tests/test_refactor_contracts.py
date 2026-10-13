@@ -76,6 +76,20 @@ class RefactorContractsTest(unittest.TestCase):
                 workflow = workflow_path.read_text(encoding="utf-8")
                 self.assertIn("FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true", workflow)
 
+    def test_primary_workflow_uses_node24_action_releases(self):
+        workflow = Path(".github/workflows/friend_circle_lite.yml").read_text(encoding="utf-8")
+
+        expected_action_releases = {
+            "actions/cache": "v6",
+            "actions/checkout": "v7",
+            "actions/setup-python": "v7",
+            "actions/upload-artifact": "v7",
+            "dawidd6/action-download-artifact": "v27",
+        }
+        for action, release in expected_action_releases.items():
+            with self.subTest(action=action):
+                self.assertIn(f"uses: {action}@{release}", workflow)
+
     def test_publish_workflow_skips_unchanged_page_tree(self):
         workflow = Path(".github/workflows/friend_circle_lite.yml").read_text(encoding="utf-8")
 
